@@ -1,98 +1,134 @@
 <!DOCTYPE html>
-<html lang="th">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <title>PromptPay QR Generator</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     body {
       font-family: sans-serif;
-      text-align: center;
-      background: #f0f4ff;
-      padding: 30px;
+      background: #f2f2f2;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
     }
-    #qrcode {
-      margin-top: 20px;
+    .container {
+      background: white;
+      padding: 2rem;
+      border-radius: 16px;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      max-width: 360px;
+      width: 100%;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin-bottom: 1rem;
+      color: #333;
     }
     input, button {
-      font-size: 16px;
-      padding: 8px;
-      margin: 5px;
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 1rem;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    #qrcode {
+      margin-top: 1rem;
     }
   </style>
 </head>
 <body>
-  <h1>สร้าง PromptPay QR Code</h1>
-  <p>รองรับเบอร์โทร / เลขบัตรประชาชน / เลขบัญชี</p>
+  <div class="container">
+    <h1>PromptPay QR</h1>
+    <input type="text" id="recipient" placeholder="Phone (08xxxxxxxx) or Thai ID" />
+    <input type="number" id="amount" placeholder="Amount (e.g. 999.00)" />
+    <input type="text" id="merchant" placeholder="Your Name (A-Z only)" />
+    <button onclick="generateQR()">Generate QR</button>
+    <div id="qrcode"></div>
+  </div>
 
-  <input type="text" id="pp_id" placeholder="ใส่เบอร์โทรหรือเลขพร้อมเพย์" />
-  <input type="number" id="amount" placeholder="จำนวนเงิน (ไม่ใส่ก็ได้)" step="0.01" />
-  <br />
-  <button onclick="generateQR()">สร้าง QR Code</button>
-
-  <div id="qrcode"></div>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
   <script>
-    function formatPromptPayID(id) {
-      // ลบทุกอย่างที่ไม่ใช่ตัวเลข
-      return id.replace(/\D/g, '');
+    function formatTLV(id, value) {
+      const length = value.length.toString().padStart(2, '0');
+      return id + length + value;
     }
 
-    function generatePromptPayPayload(id, amount) {
-      const method = id.length >= 13 ? '02' : '01'; // 01 = phone, 02 = citizen id
-      id = formatPromptPayID(id);
-      if (method === '01' && id.length === 10 && id.startsWith('0')) {
-        id = '66' + id.substring(1);
+    function formatPromptPayQR(recipient, amount, merchantName = 'PromptPay') {
+      recipient = recipient.replace(/[^0-9]/g, '');
+      if (recipient.length === 10 && recipient.startsWith('0')) {
+        recipient = '0066' + recipient.substring(1);
       }
-      const payloadFormat = '000201';
-      const merchantAccountInfo = `29370016A000000677010111${method}${('000' + id.length).slice(-2)}${id}`;
-      const countryCode = '5802TH';
-      const txnCurrency = '5303764';
-      const amountField = amount
-        ? `54${('00' + amount.toFixed(2).length).slice(-2)}${amount.toFixed(2)}`
-        : '';
-      const checksumPlaceholder = '6304';
 
-      const fullPayload = payloadFormat +
-        merchantAccountInfo +
-        txnCurrency +
-        countryCode +
-        amountField +
-        checksumPlaceholder;
+      let payload = '';
+      payload += formatTLV('00', '01'); // Format Indicator
+      payload += formatTLV('01', '11'); // Dynamic QR
 
-      const crc = CRC16(fullPayload);
-      return fullPayload + crc;
+      let merchantAccount = '';
+      merchantAccount += formatTLV('00', 'A000000677010111');
+      merchantAccount += formatTLV('01', recipient);
+      payload += formatTLV('29', merchantAccount);
+
+      payload += formatTLV('52', '0000');
+      payload += formatTLV('53', '764');
+
+      if (amount && parseFloat(amount) > 0) {
+        const fixedAmount = parseFloat(amount).toFixed(2);
+        payload += formatTLV('54', fixedAmount);
+      }
+
+      payload += formatTLV('58', 'TH');
+
+      // ใส่ชื่อผู้รับ (ต้องเป็นตัวอักษร A-Z เท่านั้น)
+      merchantName = merchantName.replace(/[^A-Za-z0-9 ]/g, '').substring(0, 25);
+      payload += formatTLV('59', merchantName || 'PromptPay');
+
+      payload += formatTLV('60', 'Bangkok');
+      payload += '6304';
+      const crc = crc16(payload);
+      return payload + crc.toUpperCase();
     }
 
-    function CRC16(data) {
+    function crc16(s) {
       let crc = 0xFFFF;
-      for (let i = 0; i < data.length; i++) {
-        crc ^= data.charCodeAt(i) << 8;
+      for (let i = 0; i < s.length; i++) {
+        crc ^= s.charCodeAt(i) << 8;
         for (let j = 0; j < 8; j++) {
           if ((crc & 0x8000) !== 0) {
             crc = (crc << 1) ^ 0x1021;
           } else {
             crc <<= 1;
           }
+          crc &= 0xffff;
         }
       }
-      return (crc & 0xFFFF).toString(16).toUpperCase().padStart(4, '0');
+      return crc.toString(16).padStart(4, '0');
     }
 
     function generateQR() {
-      const id = document.getElementById("pp_id").value;
-      const amount = parseFloat(document.getElementById("amount").value);
-      const payload = generatePromptPayPayload(id, isNaN(amount) ? null : amount);
+      const recipient = document.getElementById('recipient').value.trim();
+      const amount = document.getElementById('amount').value.trim();
+      const merchant = document.getElementById('merchant').value.trim();
 
-      document.getElementById("qrcode").innerHTML = ""; // clear previous
-      new QRCode(document.getElementById("qrcode"), {
-        text: payload,
-        width: 256,
-        height: 256,
-        colorDark: "#0033cc",     // เปลี่ยนสี QR Code ตามต้องการ
-        colorLight: "#f0f4ff",    // สีพื้นหลัง
-        correctLevel: QRCode.CorrectLevel.H
-      });
+      if (!recipient) {
+        alert("Please enter a phone number or Thai ID.");
+        return;
+      }
+
+      const payload = formatPromptPayQR(recipient, amount, merchant);
+      const qr = qrcode(0, 'M');
+      qr.addData(payload);
+      qr.make();
+      document.getElementById('qrcode').innerHTML = qr.createImgTag(6, 8);
     }
   </script>
 </body>
